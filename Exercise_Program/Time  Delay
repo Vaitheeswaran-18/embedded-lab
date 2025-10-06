@@ -1,0 +1,159 @@
+#include <nxp/iolpc2148.h>
+
+#define counter_delay 0x6FFFF // Increased delay
+
+// 7-segment display patterns (0-9)
+unsigned char seg_data[10] = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F};
+
+void delay(unsigned int k)
+{ 
+    for(int i = 0; i < k; i++); 
+}
+
+void i2c_config(void)
+{
+    PINSEL0 |= 0x00000050;      // P0.2 and P0.3 as I2C
+    I2C0CONCLR = 0x6C;          // Clear all bits
+    I2C0CONSET = 0x40;          // Enable I2C                  
+    I2C0SCLH = 70; 
+    I2C0SCLL = 50;              // 100 kHz clock rate
+}
+
+void i2c_write(char address, char data)
+{
+    I2C0CONSET = 0x20;
+    delay(50);
+    while(I2C0STAT != 0x08);
+    I2C0CONCLR = 0x28;
+    
+    
+    // Send slave address
+    I2C0DAT = address;
+    delay(50);
+    while(I2C0STAT != 0x18);
+    I2C0CONCLR = 0x08; 
+    
+    // Send data
+    I2C0DAT = data;
+    delay(50);
+    while(I2C0STAT != 0x28);
+    
+    // Stop condition
+    I2C0CONSET = 0x10;
+    I2C0CONCLR = 0x08; 
+    delay(50);
+}
+
+void display_time(unsigned char hours, unsigned char minutes, unsigned char seconds)
+{
+    // Extract digits from time components
+    unsigned char h_tens = hours / 10;
+    unsigned char h_units = hours % 10;
+    unsigned char m_tens = minutes / 10;
+    unsigned char m_units = minutes % 10;
+    unsigned char s_tens = seconds / 10;
+    unsigned char s_units = seconds % 10;
+    
+    // Display time in HH:MM:SS format but with reversed digit positions
+    i2c_write(0x7A, seg_data[s_units]);   // Seconds units on digit 6
+    i2c_write(0x78, seg_data[s_tens]);    // Seconds tens on digit 5
+    i2c_write(0x76, seg_data[m_units]);   // Minutes units on digit 4
+    i2c_write(0x74, seg_data[m_tens]);    // Minutes tens on digit 3
+    i2c_write(0x72, seg_data[h_units]);   // Hours units on digit 2
+    i2c_write(0x70, seg_data[h_tens]);    // Hours tens on digit 1
+}
+
+void clear_display(void)
+{
+    unsigned char address[6] = {0x70, 0x72, 0x74, 0x76, 0x78, 0x7A};
+    for(int i = 0; i < 6; i++) {
+        i2c_write(address[i], 0x00); // Clear all digits
+    }
+}
+
+void buzzer_init(void)
+{
+    PINSEL0_bit.P0_15 = 0;  // Set P0.15 as GPIO
+    IO0DIR_bit.P0_15 = 1;   // Set P0.15 as output
+    IO0PIN_bit.P0_15 = 0;   // Initially turn off buzzer
+}
+
+void buzzer_on(void)
+{
+    IO0PIN_bit.P0_15 = 1;   // Turn on buzzer
+}
+
+void buzzer_off(void)
+{
+    IO0PIN_bit.P0_15 = 0;   // Turn off buzzer
+}
+
+void buzzer_beep(void)
+{
+    // Beep the buzzer for a short duration
+    buzzer_on();
+    delay(5000);
+    buzzer_off();
+    delay(5000);
+}
+
+void main(void)
+{
+    unsigned char hours = 12;    // Start time: 12:00:00
+    unsigned char minutes = 0;
+    unsigned char seconds = 0;
+    unsigned int counter = 0;
+    unsigned char buzzer_activated = 0; // Flag to track if buzzer has been activated
+    
+    i2c_config();    // Configure I2C for 7 segment driver
+    buzzer_init();   // Initialize buzzer
+    
+    clear_display(); // Clear display initially
+    delay(100000);   // Initial delay
+    
+    while(1)
+    {
+        // Display current time
+        display_time(hours, minutes, seconds);
+        
+        // Check if 10 seconds have passed and buzzer hasn't been activated yet
+        if(seconds >= 10 && !buzzer_activated)
+        {
+            buzzer_activated = 1; // Set flag to prevent repeated activation
+            buzzer_on();          // Turn on buzzer
+        }
+        
+        // If buzzer is activated, make it beep continuously
+        if(buzzer_activated)
+        {
+            buzzer_beep(); // Continuous beeping
+        }
+        else
+        {
+            // 1 second delay (only when buzzer is not active)
+            delay(counter_delay);
+        }
+        
+        counter++;
+        
+        // Update time every second
+        seconds++;
+        if(seconds >= 60) {
+            seconds = 0;
+            minutes++;
+            if(minutes >= 60) {
+                minutes = 0;
+                hours++;
+                if(hours >= 24) {
+                    hours = 0;
+                }
+            }
+        }
+        
+        // Optional: Add colon blink effect every second
+        if(seconds % 2 == 0) {
+            // You can add colon display here if your display supports it
+            // i2c_write(0xXX, 0x80); // Colon pattern
+        }
+    }
+}
