@@ -1,0 +1,64 @@
+#include <nxp/iolpc2148.h>
+
+void delay(unsigned int count) {
+    for (unsigned int i = 0; i < count; i++);
+}
+
+// =============================
+//  Function Prototypes
+// =============================
+void timer0_init(void);
+__irq void timer0_ISR(void);
+void led_init(void);
+
+// =============================
+//  Main Function
+// =============================
+void main(void)
+{
+    led_init();       // Configure LED pin as output
+    timer0_init();    // Initialize Timer0 for interrupt
+
+    while (1)
+    {
+        // Main loop does nothing — LED toggling happens in interrupt
+    }
+}
+
+// =============================
+//  LED Configuration
+// =============================
+void led_init(void)
+{
+    PINSEL0 &= ~(3 << 20);    // P0.10 as GPIO (clear bits 21:20)
+    IO0DIR  |= (1 << 10);     // P0.10 as output
+    IO0CLR  = (1 << 10);      // Turn off LED initially
+}
+
+// =============================
+//  Timer0 Configuration
+// =============================
+void timer0_init(void)
+{
+    T0CTCR = 0x0;             // Timer mode
+    T0PR   = 15000 - 1;       // Prescaler (for 1ms tick if PCLK = 15MHz)
+    T0MR0  = 1000;            // Match every 1000ms (1 second)
+    T0MCR  = 0x03;            // Interrupt and Reset on MR0
+
+    VICVectAddr0 = (unsigned long)timer0_ISR; // Set ISR address
+    VICVectCntl0 = 0x20 | 4;  // Enable slot 0 for Timer0 (interrupt number 4)
+    VICIntEnable = (1 << 4);  // Enable Timer0 interrupt
+
+    T0TCR = 0x02;             // Reset timer
+    T0TCR = 0x01;             // Start timer
+}
+
+// =============================
+//  Interrupt Service Routine
+// =============================
+__irq void timer0_ISR(void)
+{
+    IO0PIN ^= (1 << 10);      // Toggle LED (read-modify-write)
+    T0IR = 0x01;              // Clear interrupt flag
+    VICVectAddr = 0x00;       // Acknowledge interrupt to VIC
+}
