@@ -1,0 +1,226 @@
+#include <nxp/iolpc2148.h>
+
+#define rs IO0PIN_bit.P0_8
+#define en IO0PIN_bit.P0_11
+
+// LCD init commands
+unsigned char commandarray[5] = {0x38, 0x01, 0x06, 0x0c, 0x80};
+
+void delay(unsigned int x) {
+    unsigned int i;
+    for (i = 0; i < x; i++);
+}
+
+void lcd_init() {
+    int i;
+    for (i = 0; i < 5; i++) {
+        IO1PIN = commandarray[i] << 16;
+        rs = 0;
+        en = 1;
+        delay(4095);
+        en = 0;
+    }
+}
+
+void lcd_command(unsigned char cmd) {
+    IO1PIN = cmd << 16;
+    rs = 0;
+    en = 1;
+    delay(4095);
+    en = 0;
+}
+
+void lcd_print(char data[]) {
+    int i;
+    for (i = 0; data[i] != '\0'; i++) {
+        IO1PIN = data[i] << 16;
+        rs = 1;
+        en = 1;
+        delay(4095);
+        en = 0;
+    }
+}
+
+void lcd_print_number(unsigned int num) {
+    char buffer[4];
+    int i = 0;
+    
+    if (num == 0) {
+        buffer[i++] = '0';
+    } else {
+        while (num > 0 && i < 3) {
+            buffer[i++] = (num % 10) + '0';
+            num /= 10;
+        }
+    }
+    buffer[i] = '\0';
+    
+    // Reverse the string
+    for (int j = 0; j < i/2; j++) {
+        char temp = buffer[j];
+        buffer[j] = buffer[i-1-j];
+        buffer[i-1-j] = temp;
+    }
+    
+    lcd_print(buffer);
+}
+
+void buz() {
+    IO0PIN_bit.P0_15 = 1; // buzzer on
+    delay(50000);
+    IO0PIN_bit.P0_15 = 0; // buzzer off
+}
+
+// Keypad scan function
+char get_key() {
+    int row_vals[] = {0x000E0000, 0x000D0000, 0x000B0000, 0x00070000};
+    char key_map[4][4] = {
+        {'1', '2', '3', '+'},
+        {'4', '5', '6', '-'},
+        {'7', '8', '9', '*'},
+        {'C', '0', '=', '/'}
+    };
+
+    int row, col;
+
+    for (row = 0; row < 4; row++) {
+        // Clear all rows (P0.16-P0.19)
+        IO0SET = 0x000F0000;    // set rows high
+        IO0CLR = (~row_vals[row]) & 0x000F0000; // drive current row low
+
+        delay(1000);
+
+        int col_val = IO0PIN & 0x00F00000; // read cols P0.20-P0.23
+
+        if (col_val != 0x00F00000) { // some col is low (pressed)
+            for (col = 0; col < 4; col++) {
+                if ((col_val & (1 << (20 + col))) == 0) {
+                    // wait for release
+                    while ((IO0PIN & 0x00F00000) != 0x00F00000);
+                    return key_map[row][col];
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+void show_results(unsigned int votes1, unsigned int votes2) {
+    lcd_command(0x80);
+    lcd_print("Results:");
+    lcd_command(0xC0);
+    lcd_print("User1:");
+    lcd_print_number(votes1);
+    lcd_print(" User2:");
+    lcd_print_number(votes2);
+    delay(2000000);
+}
+
+void reset_votes(unsigned int *votes1, unsigned int *votes2) {
+    *votes1 = 0;
+    *votes2 = 0;
+    lcd_command(0x01);
+    lcd_command(0x80);
+    lcd_print("Votes Reset!");
+    delay(1000000);
+}
+
+int main() {
+    char key = 0;
+    unsigned int votes_user1 = 0;
+    unsigned int votes_user2 = 0;
+    
+    // Configure pins:
+    PINSEL0 = 0x00000000; // GPIO function for P0 pins
+    PINSEL2 = 0x00000000; // GPIO function for P1 pins
+
+    // Buzzer pin
+    PINSEL0_bit.P0_15 = 0;
+    IO0DIR_bit.P0_15 = 1;
+
+    // Keypad rows (P0.16-P0.19) output
+    IO0DIR |= 0x000F0000;
+
+    // Keypad columns (P0.20-P0.23) input
+    IO0DIR &= ~0x00F00000;
+
+    // LCD control pins output
+    IO0DIR_bit.P0_8 = 1;  // rs
+    IO0DIR_bit.P0_11 = 1; // en
+
+    // LCD data pins output (P1.16-P1.23)
+    IO1DIR |= 0x00FF0000;
+
+    // LEDs output (P1.24-P1.31) for visual feedback
+    IO1DIR |= 0xFF000000;
+
+    lcd_init();
+    
+    // Display welcome message
+    lcd_command(0x80);
+    lcd_print("Voting Machine");
+    lcd_command(0xC0);
+    lcd_print("1:User1 2:User2");
+    delay(1000000);
+
+    while (1) {
+        // Display current status
+        lcd_command(0x80);
+        lcd_print("U1:");
+        lcd_print_number(votes_user1);
+        lcd_print(" U2:");
+        lcd_print_number(votes_user2);
+        lcd_print("    ");
+        
+        lcd_command(0xC0);
+        lcd_print("1:V1 2:V2 C:Res =:Res");
+        
+        key = get_key();  // Scan keypad
+        
+        if (key != 0) {
+            switch(key) {
+                case '1':  // Vote for User 1
+                    votes_user1++;
+                    buz();
+                    IO1SET = 0x01000000; // LED feedback for User 1
+                    lcd_command(0x83);
+                    lcd_print_number(votes_user1);
+                    lcd_print("   ");
+                    delay(100000);
+                    IO1CLR = 0xFF000000;
+                    break;
+                    
+                case '2':  // Vote for User 2
+                    votes_user2++;
+                    buz();
+                    IO1SET = 0x02000000; // LED feedback for User 2
+                    lcd_command(0x89);
+                    lcd_print_number(votes_user2);
+                    lcd_print("   ");
+                    delay(100000);
+                    IO1CLR = 0xFF000000;
+                    break;
+                    
+                case '=':  // Show results
+                    show_results(votes_user1, votes_user2);
+                    break;
+                    
+                case 'C':  // Clear/reset votes
+                    reset_votes(&votes_user1, &votes_user2);
+                    break;
+                    
+                case '+':  // Additional function - show total votes
+                    lcd_command(0x01);
+                    lcd_command(0x80);
+                    lcd_print("Total Votes:");
+                    lcd_print_number(votes_user1 + votes_user2);
+                    delay(1000000);
+                    break;
+            }
+        }
+        
+        delay(10000);
+    }
+    
+    return 0;
+}
