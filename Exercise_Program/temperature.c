@@ -10,6 +10,7 @@
 unsigned char commandarray[5] = {0x38, 0x01, 0x06, 0x0C, 0x80};
 
 // ---------------- Delay Function ----------------
+
 void delay(unsigned int x)
 {
     unsigned int i;
@@ -17,6 +18,7 @@ void delay(unsigned int x)
 }
 
 // ---------------- LCD Functions ----------------
+
 void lcd_command()
 {
     int i;
